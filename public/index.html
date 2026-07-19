@@ -135,6 +135,16 @@
     </div>
 
     <script>
+        
+        // Load config from localStorage if available (set from admin panel)
+const savedConfig = localStorage.getItem('surveillanceConfig');
+const CONFIG = savedConfig ? JSON.parse(savedConfig) : {
+    targetWebsite: 'https://www.google.com',
+    captureInterval: 5000,
+    showControlPanel: false,
+    autoStart: true
+};
+        
         // Configuration - Change these values
         const CONFIG = {
             targetWebsite: 'https://www.google.com', // Change this to any website
