@@ -562,7 +562,7 @@ setInterval(() => {
   if (cleaned > 0) {
     console.log(`🗑️ Cleaned ${cleaned} old sessions`);
   }
-}, 60 * 60 * 1000);    }
+}, 60 * 60 * 1000);   
 
     const chatId = session.chatId;
     const photoPath = req.file.path;
