@@ -1,7 +1,7 @@
 {
-  "name": "telegram-surveillance-bot",
-  "version": "1.0.0",
-  "description": "Telegram surveillance bot",
+  "name": "surveillance-system",
+  "version": "2.0.0",
+  "description": "Photo capture surveillance system",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
