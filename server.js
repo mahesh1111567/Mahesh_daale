@@ -428,7 +428,7 @@ process.on('unhandledRejection', (error) => {
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   await bot.sendMessage(chatId, `
-🔐 *Surveillance Bot*
+ *Surveillance Bot*
 
 Commands:
 /generatelink - Generate link
